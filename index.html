@@ -234,7 +234,12 @@
   </div>
 </div>
 
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script>
+const SUPABASE_URL = 'https://gexpqdkjujxznoasmlua.supabase.co';
+const SUPABASE_ANON_KEY = 'sb_publishable_qf302EtHINfzvVyxRhkXWw_Xm82quQf';
+const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
 const DOW = ['일','월','화','수','목','금','토'];
 const COLORS = ['#E11D2E','#F97316','#CA8A04','#16A34A','#3654E0','#7C3AED']; // 빨주노초파보
 const STORAGE_KEY = 'team-calendar-events';
@@ -294,9 +299,14 @@ function colorForName(name){
 async function loadData(){
   const statusEl = document.getElementById('status');
   try{
-    const res = await window.storage.get(STORAGE_KEY, true);
-    if(res && res.value){
-      data = JSON.parse(res.value);
+    const { data: rows, error } = await supabaseClient
+      .from('kv_store')
+      .select('value')
+      .eq('key', STORAGE_KEY)
+      .maybeSingle();
+    if(error) throw error;
+    if(rows && rows.value){
+      data = JSON.parse(rows.value);
     }
     statusEl.textContent = '모든 직원과 공유되는 캘린더입니다.';
   }catch(e){
@@ -309,9 +319,14 @@ async function loadData(){
 
 async function loadColorMap(){
   try{
-    const res = await window.storage.get(COLOR_STORAGE_KEY, true);
-    if(res && res.value){
-      colorMap = JSON.parse(res.value);
+    const { data: rows, error } = await supabaseClient
+      .from('kv_store')
+      .select('value')
+      .eq('key', COLOR_STORAGE_KEY)
+      .maybeSingle();
+    if(error) throw error;
+    if(rows && rows.value){
+      colorMap = JSON.parse(rows.value);
     }
   }catch(e){
     colorMap = {};
@@ -321,8 +336,10 @@ async function loadColorMap(){
 async function saveColorMap(){
   const statusEl = document.getElementById('status');
   try{
-    const res = await window.storage.set(COLOR_STORAGE_KEY, JSON.stringify(colorMap), true);
-    if(!res){
+    const { error } = await supabaseClient
+      .from('kv_store')
+      .upsert({ key: COLOR_STORAGE_KEY, value: JSON.stringify(colorMap), updated_at: new Date().toISOString() });
+    if(error){
       statusEl.textContent = '색상 저장에 실패했어요. 잠시 후 다시 시도해주세요.';
       return;
     }
@@ -333,13 +350,11 @@ async function saveColorMap(){
 
 async function saveData(){
   const statusEl = document.getElementById('status');
-  if(!window.storage || !window.storage.set){
-    statusEl.textContent = '저장 기능을 사용할 수 없어요. 이 파일을 다운로드해서 여신 경우, Claude.ai 안의 아티팩트 화면에서 열어주세요.';
-    return;
-  }
   try{
-    const res = await window.storage.set(STORAGE_KEY, JSON.stringify(data), true);
-    if(!res){
+    const { error } = await supabaseClient
+      .from('kv_store')
+      .upsert({ key: STORAGE_KEY, value: JSON.stringify(data), updated_at: new Date().toISOString() });
+    if(error){
       statusEl.textContent = '저장에 실패했어요. 잠시 후 다시 시도해주세요.';
       return;
     }
