@@ -1,0 +1,753 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<title>팀 공용 일정 캘린더</title>
+<style>
+  :root{
+    --bg:#F6F7FA; --panel:#FFFFFF; --ink:#20242E; --sub:#767E8C; --line:#E6E8EE;
+    --accent:#3654E0; --accent-bg:#EAEEFC; --today:#FF7A3D;
+    --danger:#D64550; --holiday:#E0343F;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0; background:var(--bg); color:var(--ink);
+    font-family:'Pretendard',-apple-system,BlinkMacSystemFont,'Malgun Gothic','Apple SD Gothic Neo',sans-serif;
+  }
+  .wrap{max-width:1600px;margin:0 auto;padding:28px 24px 60px;}
+  .top{display:flex;align-items:center;justify-content:flex-end;gap:16px;margin-bottom:20px;flex-wrap:wrap;}
+  .nav{display:flex;align-items:center;gap:8px;}
+  .nav button{
+    border:1px solid var(--line);background:var(--panel);border-radius:8px;
+    width:34px;height:34px;cursor:pointer;font-size:15px;color:var(--ink);
+  }
+  .nav button:hover{background:var(--accent-bg);border-color:var(--accent);}
+  .nav .today-btn{width:auto;padding:0 14px;font-size:13px;font-weight:600;}
+  .legend{display:flex;flex-wrap:wrap;gap:8px;margin:14px 0 22px;}
+  .chip{
+    display:flex;align-items:center;gap:6px;background:var(--panel);border:1px solid var(--line);
+    border-radius:999px;padding:5px 12px 5px 8px;font-size:12px;color:var(--ink);
+    cursor:pointer;
+  }
+  .chip:hover{border-color:var(--accent);background:var(--accent-bg);}
+  .dot{width:9px;height:9px;border-radius:50%;flex:none;}
+  .months{
+    display:grid;
+    grid-template-columns:2.3fr 1fr;
+    gap:16px;
+    align-items:stretch;
+  }
+  .side-col{display:flex;flex-direction:column;gap:16px;}
+  @media (max-width:860px){
+    .months{grid-template-columns:1fr;}
+    .side-col{min-height:420px;}
+  }
+  .month{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:16px;}
+  .month.center{padding:24px;border-color:var(--accent);box-shadow:0 0 0 1.5px var(--accent);}
+  .month.side{padding:10px;opacity:.88;flex:1;display:flex;flex-direction:column;min-height:0;}
+  .month.side:hover{opacity:1;}
+  .month h2{font-size:15px;font-weight:700;margin:0 0 12px;text-align:center;}
+  .month.center h2{font-size:20px;margin-bottom:18px;}
+  .month.side h2{font-size:13px;margin-bottom:8px;color:var(--sub);flex:none;}
+  .grid{display:grid;grid-template-columns:repeat(7,1fr);gap:4px;}
+  .month.center .grid{gap:7px;}
+  .month.side .grid{gap:3px;flex:1;grid-auto-rows:1fr;}
+  .dow{font-size:11px;color:var(--sub);text-align:center;padding-bottom:6px;font-weight:600;}
+  .dow.red{color:var(--holiday);}
+  .month.side .dow{font-size:9px;padding-bottom:3px;}
+  .day{
+    position:relative;min-height:64px;border-radius:8px;padding:4px;cursor:pointer;
+    border:1px solid transparent;background:#FBFBFC;
+  }
+  .month.center .day{min-height:126px;padding:7px;border-radius:10px;}
+  .month.side .day{min-height:0;height:100%;padding:3px 3px 4px;border-radius:6px;}
+  .day:hover{border-color:var(--accent);background:var(--accent-bg);}
+  .day.blank{visibility:hidden;pointer-events:none;}
+  .day .num{font-size:12px;font-weight:600;color:var(--ink);}
+  .day .num.red{color:var(--holiday);}
+  .day .hname{font-size:9px;color:var(--holiday);font-weight:600;margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .month.center .day .num{font-size:14px;}
+  .month.center .day .hname{font-size:10.5px;}
+  .month.side .day .num{font-size:11px;}
+  .month.side .day .hname{display:none;}
+  .day.today .num{
+    display:inline-flex;align-items:center;justify-content:center;
+    width:20px;height:20px;border-radius:50%;background:var(--today);color:#fff;
+  }
+  .month.center .day.today .num{width:25px;height:25px;font-size:13px;}
+  .month.side .day.today .num{width:16px;height:16px;font-size:9px;}
+  .day .badges{display:flex;flex-direction:column;gap:3px;margin-top:4px;}
+  .badge{
+    font-size:10.5px;font-weight:600;line-height:15px;padding:0 6px;border-radius:5px;color:#fff;
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+  }
+  .month.center .badge{font-size:12px;line-height:19px;padding:0 8px;border-radius:6px;}
+  .badge.more{background:transparent;color:var(--sub);font-weight:600;}
+  .month.side .badges{margin-top:3px;flex-direction:row;flex-wrap:wrap;gap:2px;}
+  .month.side .badge{
+    width:6px;height:6px;padding:0;border-radius:50%;font-size:0;line-height:0;overflow:visible;
+  }
+  .month.side .badge.more{width:auto;height:auto;font-size:8px;color:var(--sub);}
+  .empty-msg{text-align:center;color:var(--sub);font-size:13px;padding:40px 0;}
+
+  .overlay{
+    display:none;position:fixed;inset:0;background:rgba(20,22,30,.45);
+    align-items:flex-start;justify-content:center;padding:6vh 16px;z-index:50;overflow:auto;
+  }
+  .overlay.open{display:flex;}
+  .modal{background:var(--panel);border-radius:14px;padding:22px;width:100%;max-width:420px;}
+  .modal h3{margin:0 0 2px;font-size:16px;}
+  .modal .sub{color:var(--sub);font-size:12px;margin:0 0 16px;}
+  .field{margin-bottom:12px;}
+  .field label{display:block;font-size:12px;color:var(--sub);margin-bottom:5px;font-weight:600;}
+  .field input,.field textarea{
+    width:100%;border:1px solid var(--line);border-radius:8px;padding:9px 10px;
+    font-size:13px;font-family:inherit;color:var(--ink);background:#FCFCFD;
+  }
+  .field input:focus,.field textarea:focus{outline:none;border-color:var(--accent);}
+  .field textarea{resize:vertical;min-height:56px;}
+  .name-dropdown{
+    display:none;position:absolute;top:calc(100% + 4px);left:0;right:0;z-index:10;
+    background:var(--panel);border:1px solid var(--line);border-radius:8px;
+    max-height:160px;overflow:auto;box-shadow:0 6px 18px rgba(20,22,30,.12);
+  }
+  .name-dropdown.open{display:block;}
+  .name-dropdown .opt{
+    padding:8px 10px;font-size:13px;cursor:pointer;display:flex;align-items:center;gap:8px;
+  }
+  .name-dropdown .opt:hover{background:var(--accent-bg);}
+  .name-dropdown .opt .dot{width:8px;height:8px;border-radius:50%;flex:none;}
+  .name-dropdown .empty{padding:8px 10px;font-size:12px;color:var(--sub);}
+  .err{color:var(--danger);font-size:12px;margin-top:4px;display:none;}
+  .row2{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
+  .modal-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:16px;}
+  .btn{border-radius:8px;padding:9px 16px;font-size:13px;font-weight:600;cursor:pointer;border:1px solid var(--line);background:#fff;}
+  .btn.primary{background:var(--accent);border-color:var(--accent);color:#fff;}
+  .btn.ghost{background:transparent;border-color:transparent;color:var(--sub);}
+
+  .list{margin-top:14px;display:flex;flex-direction:column;gap:8px;max-height:220px;overflow:auto;}
+  .item{
+    display:flex;align-items:flex-start;gap:8px;border:1px solid var(--line);border-radius:8px;padding:8px 10px;
+  }
+  .item .bar{width:4px;align-self:stretch;border-radius:4px;flex:none;}
+  .item .body{flex:1;min-width:0;}
+  .item .name{font-size:12px;font-weight:700;}
+  .item .title{font-size:13px;margin:2px 0;}
+  .item .note{font-size:12px;color:var(--sub);white-space:pre-wrap;}
+  .item .del{background:none;border:none;color:var(--sub);cursor:pointer;font-size:12px;}
+  .item .del:hover{color:var(--danger);}
+  .swatches{display:flex;flex-wrap:wrap;gap:6px;}
+  .swatch{
+    width:24px;height:24px;border-radius:50%;cursor:pointer;border:2px solid transparent;
+    padding:0;flex:none;
+  }
+  .swatch.selected{border-color:var(--ink);box-shadow:0 0 0 2px #fff inset;}
+  .status{font-size:12px;color:var(--sub);margin-top:10px;text-align:center;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="top">
+    <div class="nav">
+      <button id="settingsBtn" title="이름별 색상 설정">⚙</button>
+      <button id="prevBtn" title="이전 달">‹</button>
+      <button class="today-btn" id="todayBtn">오늘</button>
+      <button id="nextBtn" title="다음 달">›</button>
+    </div>
+  </div>
+  <div class="legend" id="legend"></div>
+  <div class="months" id="months"></div>
+  <div class="status" id="status">불러오는 중…</div>
+</div>
+
+<div class="overlay" id="overlay">
+  <div class="modal">
+    <h3 id="modalDate">-</h3>
+    <p class="sub">이 날짜의 일정을 확인하고 새 일정을 등록하세요.</p>
+
+    <div class="list" id="list"></div>
+
+    <div style="border-top:1px solid var(--line);margin-top:14px;padding-top:14px;">
+      <div class="row2">
+        <div class="field" style="position:relative;">
+          <label>이름</label>
+          <input id="fName" placeholder="예: 김민준" autocomplete="off">
+          <div id="fNameDropdown" class="name-dropdown"></div>
+        </div>
+        <div class="field">
+          <label>시간 (선택)</label>
+          <input id="fTime" placeholder="예: 14:00">
+        </div>
+      </div>
+      <div class="field">
+        <label>일정 제목</label>
+        <input id="fTitle" placeholder="예: 거래처 미팅">
+      </div>
+      <div class="field">
+        <label>메모 (선택)</label>
+        <textarea id="fNote" placeholder="추가로 공유할 내용이 있으면 적어주세요"></textarea>
+      </div>
+      <div class="err" id="fErr">이름과 일정 제목을 입력해주세요.</div>
+    </div>
+
+    <div class="modal-actions">
+      <button class="btn ghost" id="closeBtn">닫기</button>
+      <button class="btn primary" id="addBtn">일정 추가</button>
+    </div>
+  </div>
+</div>
+
+<div class="overlay" id="colorOverlay">
+  <div class="modal">
+    <h3>이름별 색상 설정</h3>
+    <p class="sub">직원 이름마다 원하는 색상을 직접 지정할 수 있어요. 지정하지 않은 이름은 자동으로 색이 배정돼요.</p>
+
+    <div class="list" id="colorList"></div>
+
+    <div style="border-top:1px solid var(--line);margin-top:14px;padding-top:14px;">
+      <div class="field">
+        <label>새 이름 추가</label>
+        <input id="newColorName" placeholder="예: 이서연">
+      </div>
+      <div class="field" style="margin-bottom:0;">
+        <label>색상 선택</label>
+        <div class="swatches" id="newColorSwatches"></div>
+      </div>
+      <button class="btn" id="addColorRowBtn" style="margin-top:10px;width:100%;">추가</button>
+    </div>
+
+    <div class="modal-actions">
+      <button class="btn ghost" id="colorCloseBtn">닫기</button>
+      <button class="btn primary" id="colorSaveBtn">저장</button>
+    </div>
+  </div>
+</div>
+
+<div class="overlay" id="personOverlay">
+  <div class="modal" style="max-width:480px;">
+    <h3 id="personTitle">-</h3>
+    <p class="sub" id="personSub">이 사람이 등록한 올해 일정이에요.</p>
+    <div class="list" id="personList" style="max-height:420px;"></div>
+    <div class="modal-actions">
+      <button class="btn ghost" id="personCloseBtn">닫기</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const DOW = ['일','월','화','수','목','금','토'];
+const COLORS = ['#E11D2E','#F97316','#CA8A04','#16A34A','#3654E0','#7C3AED']; // 빨주노초파보
+const STORAGE_KEY = 'team-calendar-events';
+const COLOR_STORAGE_KEY = 'team-calendar-colors';
+
+// 대한민국 법정공휴일 + 대체공휴일 + 임시공휴일 (2025~2027, 관공서의 공휴일에 관한 규정 기준)
+const HOLIDAYS = {
+  // 2025
+  '2025-01-01':'신정', '2025-01-27':'임시공휴일', '2025-01-28':'설날 연휴', '2025-01-29':'설날', '2025-01-30':'설날 연휴',
+  '2025-03-01':'삼일절', '2025-03-03':'대체공휴일',
+  '2025-05-05':'어린이날·부처님오신날', '2025-05-06':'대체공휴일',
+  '2025-06-03':'임시공휴일(대선)', '2025-06-06':'현충일',
+  '2025-08-15':'광복절',
+  '2025-10-03':'개천절', '2025-10-05':'추석 연휴', '2025-10-06':'추석', '2025-10-07':'추석 연휴', '2025-10-08':'대체공휴일', '2025-10-09':'한글날',
+  '2025-12-25':'기독탄신일',
+  // 2026
+  '2026-01-01':'신정',
+  '2026-02-16':'설날 연휴', '2026-02-17':'설날', '2026-02-18':'설날 연휴',
+  '2026-03-01':'삼일절', '2026-03-02':'대체공휴일',
+  '2026-05-01':'노동절', '2026-05-05':'어린이날', '2026-05-24':'부처님오신날', '2026-05-25':'대체공휴일',
+  '2026-06-03':'지방선거', '2026-06-06':'현충일',
+  '2026-07-17':'제헌절',
+  '2026-08-15':'광복절', '2026-08-17':'대체공휴일',
+  '2026-09-24':'추석 연휴', '2026-09-25':'추석', '2026-09-26':'추석 연휴',
+  '2026-10-03':'개천절', '2026-10-05':'대체공휴일', '2026-10-09':'한글날',
+  '2026-12-25':'기독탄신일',
+  // 2027
+  '2027-01-01':'신정',
+  '2027-02-06':'설날 연휴', '2027-02-07':'설날', '2027-02-08':'설날 연휴', '2027-02-09':'대체공휴일',
+  '2027-03-01':'삼일절',
+  '2027-05-01':'노동절', '2027-05-03':'대체공휴일', '2027-05-05':'어린이날', '2027-05-13':'부처님오신날',
+  '2027-06-06':'현충일',
+  '2027-07-17':'제헌절', '2027-07-19':'대체공휴일',
+  '2027-08-15':'광복절', '2027-08-16':'대체공휴일',
+  '2027-09-14':'추석 연휴', '2027-09-15':'추석', '2027-09-16':'추석 연휴',
+  '2027-10-03':'개천절', '2027-10-04':'대체공휴일', '2027-10-09':'한글날', '2027-10-11':'대체공휴일',
+  '2027-12-25':'기독탄신일', '2027-12-27':'대체공휴일'
+};
+
+let data = {};       // { "YYYY-MM-DD": [ {id,name,title,time,note,color} ] }
+let colorMap = {};   // { "이름": "#hex" } - 관리자가 지정한 이름별 고정 색상
+let pendingColorMap = {}; // 설정 모달에서 저장 전 임시로 편집 중인 값
+let baseDate = new Date();
+let selectedDate = null;
+
+function pad(n){ return String(n).padStart(2,'0'); }
+function fmtKey(y,m,d){ return `${y}-${pad(m+1)}-${pad(d)}`; }
+function todayKey(){ const t=new Date(); return fmtKey(t.getFullYear(),t.getMonth(),t.getDate()); }
+
+function colorForName(name){
+  if(colorMap[name]) return colorMap[name];
+  let h = 0;
+  for(let i=0;i<name.length;i++){ h = (h*31 + name.charCodeAt(i)) >>> 0; }
+  return COLORS[h % COLORS.length];
+}
+
+async function loadData(){
+  const statusEl = document.getElementById('status');
+  try{
+    const res = await window.storage.get(STORAGE_KEY, true);
+    if(res && res.value){
+      data = JSON.parse(res.value);
+    }
+    statusEl.textContent = '모든 직원과 공유되는 캘린더입니다.';
+  }catch(e){
+    data = {};
+    statusEl.textContent = '모든 직원과 공유되는 캘린더입니다. (신규 캘린더)';
+  }
+  await loadColorMap();
+  render();
+}
+
+async function loadColorMap(){
+  try{
+    const res = await window.storage.get(COLOR_STORAGE_KEY, true);
+    if(res && res.value){
+      colorMap = JSON.parse(res.value);
+    }
+  }catch(e){
+    colorMap = {};
+  }
+}
+
+async function saveColorMap(){
+  const statusEl = document.getElementById('status');
+  try{
+    const res = await window.storage.set(COLOR_STORAGE_KEY, JSON.stringify(colorMap), true);
+    if(!res){
+      statusEl.textContent = '색상 저장에 실패했어요. 잠시 후 다시 시도해주세요.';
+      return;
+    }
+  }catch(e){
+    statusEl.textContent = `색상 저장 중 오류가 발생했어요: ${e && e.message ? e.message : e}`;
+  }
+}
+
+async function saveData(){
+  const statusEl = document.getElementById('status');
+  if(!window.storage || !window.storage.set){
+    statusEl.textContent = '저장 기능을 사용할 수 없어요. 이 파일을 다운로드해서 여신 경우, Claude.ai 안의 아티팩트 화면에서 열어주세요.';
+    return;
+  }
+  try{
+    const res = await window.storage.set(STORAGE_KEY, JSON.stringify(data), true);
+    if(!res){
+      statusEl.textContent = '저장에 실패했어요. 잠시 후 다시 시도해주세요.';
+      return;
+    }
+    statusEl.textContent = '모든 직원과 공유되는 캘린더입니다. (방금 저장됨)';
+  }catch(e){
+    statusEl.textContent = `저장 중 오류가 발생했어요: ${e && e.message ? e.message : e}`;
+  }
+}
+
+function buildLegend(){
+  const names = new Set();
+  Object.values(data).forEach(list => list.forEach(ev => names.add(ev.name)));
+  const legend = document.getElementById('legend');
+  legend.innerHTML = '';
+  if(names.size === 0){
+    legend.innerHTML = '<span style="font-size:12px;color:var(--sub);">등록된 일정이 없습니다. 날짜를 클릭해 첫 일정을 추가해보세요.</span>';
+    return;
+  }
+  [...names].sort().forEach(name => {
+    const chip = document.createElement('div');
+    chip.className = 'chip';
+    chip.innerHTML = `<span class="dot" style="background:${colorForName(name)}"></span>${escapeHtml(name)}`;
+    chip.addEventListener('click', () => openPersonModal(name));
+    legend.appendChild(chip);
+  });
+}
+
+function escapeHtml(s){
+  return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+function renderMonth(year, month, isCenter){
+  const container = document.createElement('div');
+  container.className = 'month' + (isCenter ? ' center' : ' side');
+
+  const h2 = document.createElement('h2');
+  h2.textContent = `${year}년 ${month+1}월`;
+  container.appendChild(h2);
+
+  const grid = document.createElement('div');
+  grid.className = 'grid';
+  DOW.forEach((d, idx) => {
+    const el = document.createElement('div');
+    el.className = 'dow' + (idx === 0 || idx === 6 ? ' red' : '');
+    el.textContent = d;
+    grid.appendChild(el);
+  });
+
+  const firstDow = new Date(year, month, 1).getDay();
+  const daysInMonth = new Date(year, month+1, 0).getDate();
+  const tKey = todayKey();
+
+  for(let i=0;i<firstDow;i++){
+    const blank = document.createElement('div');
+    blank.className = 'day blank';
+    grid.appendChild(blank);
+  }
+
+  for(let d=1; d<=daysInMonth; d++){
+    const key = fmtKey(year, month, d);
+    const dow = new Date(year, month, d).getDay();
+    const holidayName = HOLIDAYS[key];
+    const isRed = dow === 0 || dow === 6 || !!holidayName;
+    const cell = document.createElement('div');
+    cell.className = 'day' + (key === tKey ? ' today' : '');
+    cell.innerHTML = `<span class="num${isRed ? ' red' : ''}">${d}</span>` +
+      (holidayName && isCenter ? `<div class="hname">${escapeHtml(holidayName)}</div>` : '');
+
+    const events = data[key] || [];
+    if(events.length){
+      const badges = document.createElement('div');
+      badges.className = 'badges';
+      const maxShown = isCenter ? 4 : 4;
+      events.slice(0,maxShown).forEach(ev => {
+        const b = document.createElement('div');
+        b.className = 'badge';
+        b.style.background = colorForName(ev.name);
+        if(isCenter){
+          b.textContent = (ev.time ? ev.time + ' ' : '') + ev.title;
+          b.title = `${ev.name} · ${ev.title}`;
+        }else{
+          b.title = `${ev.name} · ${ev.title}`;
+        }
+        badges.appendChild(b);
+      });
+      if(events.length > maxShown){
+        const more = document.createElement('div');
+        more.className = 'badge more';
+        more.textContent = isCenter ? `+${events.length-maxShown}개 더` : `+${events.length-maxShown}`;
+        badges.appendChild(more);
+      }
+      cell.appendChild(badges);
+    }
+
+    cell.addEventListener('click', () => openModal(key));
+    grid.appendChild(cell);
+  }
+
+  container.appendChild(grid);
+  return container;
+}
+
+function render(){
+  buildLegend();
+  const monthsEl = document.getElementById('months');
+  monthsEl.innerHTML = '';
+  const y = baseDate.getFullYear();
+  const m = baseDate.getMonth();
+
+  // 이번 달(오늘 포함) - 왼쪽에 최대한 크게
+  monthsEl.appendChild(renderMonth(y, m, true));
+
+  // 오른쪽: 이전 달 바로 아래에 다음 달이 붙어서 나옴
+  const sideCol = document.createElement('div');
+  sideCol.className = 'side-col';
+  const prev = new Date(y, m-1, 1);
+  sideCol.appendChild(renderMonth(prev.getFullYear(), prev.getMonth(), false));
+  const next = new Date(y, m+1, 1);
+  sideCol.appendChild(renderMonth(next.getFullYear(), next.getMonth(), false));
+  monthsEl.appendChild(sideCol);
+}
+
+function openModal(key){
+  selectedDate = key;
+  const [y,m,d] = key.split('-').map(Number);
+  document.getElementById('modalDate').textContent = `${y}년 ${m}월 ${d}일 일정`;
+  renderList();
+  document.getElementById('fName').value = '';
+  document.getElementById('fTime').value = '';
+  document.getElementById('fTitle').value = '';
+  document.getElementById('fNote').value = '';
+  document.getElementById('fErr').style.display = 'none';
+  document.getElementById('fNameDropdown').classList.remove('open');
+  document.getElementById('overlay').classList.add('open');
+}
+
+function closeModal(){
+  document.getElementById('overlay').classList.remove('open');
+  selectedDate = null;
+}
+
+function renderList(){
+  const list = document.getElementById('list');
+  const events = (data[selectedDate] || []).slice().sort((a,b) => (a.time||'').localeCompare(b.time||''));
+  if(events.length === 0){
+    list.innerHTML = '<div style="font-size:13px;color:var(--sub);text-align:center;padding:12px 0;">등록된 일정이 없습니다.</div>';
+    return;
+  }
+  list.innerHTML = '';
+  events.forEach(ev => {
+    const row = document.createElement('div');
+    row.className = 'item';
+    row.innerHTML = `
+      <div class="bar" style="background:${colorForName(ev.name)}"></div>
+      <div class="body">
+        <div class="name">${escapeHtml(ev.name)}${ev.time ? ' · ' + escapeHtml(ev.time) : ''}</div>
+        <div class="title">${escapeHtml(ev.title)}</div>
+        ${ev.note ? `<div class="note">${escapeHtml(ev.note)}</div>` : ''}
+      </div>
+      <button class="del" data-id="${ev.id}">삭제</button>
+    `;
+    list.appendChild(row);
+  });
+  list.querySelectorAll('.del').forEach(btn => {
+    btn.addEventListener('click', () => deleteEvent(btn.dataset.id));
+  });
+}
+
+async function deleteEvent(id){
+  data[selectedDate] = (data[selectedDate] || []).filter(ev => ev.id !== id);
+  if(data[selectedDate].length === 0) delete data[selectedDate];
+  renderList();
+  render();
+  await saveData();
+}
+
+async function addEvent(){
+  const name = document.getElementById('fName').value.trim();
+  const title = document.getElementById('fTitle').value.trim();
+  const time = document.getElementById('fTime').value.trim();
+  const note = document.getElementById('fNote').value.trim();
+  const errEl = document.getElementById('fErr');
+
+  if(!name || !title){
+    errEl.style.display = 'block';
+    return;
+  }
+  errEl.style.display = 'none';
+
+  const ev = {
+    id: Date.now().toString(36) + Math.random().toString(36).slice(2,7),
+    name, title, time, note
+  };
+  if(!data[selectedDate]) data[selectedDate] = [];
+  data[selectedDate].push(ev);
+
+  document.getElementById('fName').value = '';
+  document.getElementById('fTime').value = '';
+  document.getElementById('fTitle').value = '';
+  document.getElementById('fNote').value = '';
+
+  renderList();
+  render();
+  await saveData();
+}
+
+document.getElementById('prevBtn').addEventListener('click', () => {
+  baseDate = new Date(baseDate.getFullYear(), baseDate.getMonth()-1, 1);
+  render();
+});
+document.getElementById('nextBtn').addEventListener('click', () => {
+  baseDate = new Date(baseDate.getFullYear(), baseDate.getMonth()+1, 1);
+  render();
+});
+document.getElementById('todayBtn').addEventListener('click', () => {
+  baseDate = new Date();
+  render();
+});
+document.getElementById('closeBtn').addEventListener('click', closeModal);
+document.getElementById('overlay').addEventListener('click', (e) => {
+  if(e.target.id === 'overlay') closeModal();
+});
+document.getElementById('addBtn').addEventListener('click', addEvent);
+
+function renderNameDropdown(filterText){
+  const dropdown = document.getElementById('fNameDropdown');
+  const names = allKnownNames().filter(n =>
+    !filterText || n.toLowerCase().includes(filterText.toLowerCase())
+  );
+  if(names.length === 0){
+    dropdown.innerHTML = '<div class="empty">저장된 이름이 없어요.</div>';
+  }else{
+    dropdown.innerHTML = '';
+    names.forEach(n => {
+      const opt = document.createElement('div');
+      opt.className = 'opt';
+      opt.innerHTML = `<span class="dot" style="background:${colorForName(n)}"></span>${escapeHtml(n)}`;
+      opt.addEventListener('mousedown', (e) => {
+        e.preventDefault();
+        document.getElementById('fName').value = n;
+        dropdown.classList.remove('open');
+      });
+      dropdown.appendChild(opt);
+    });
+  }
+  dropdown.classList.add('open');
+}
+
+const fNameInput = document.getElementById('fName');
+fNameInput.addEventListener('click', () => renderNameDropdown(fNameInput.value.trim()));
+fNameInput.addEventListener('input', () => renderNameDropdown(fNameInput.value.trim()));
+fNameInput.addEventListener('blur', () => {
+  setTimeout(() => document.getElementById('fNameDropdown').classList.remove('open'), 120);
+});
+
+function openPersonModal(name){
+  const year = baseDate.getFullYear();
+  const rows = [];
+  Object.keys(data).forEach(key => {
+    const [y] = key.split('-').map(Number);
+    if(y !== year) return;
+    (data[key] || []).forEach(ev => {
+      if(ev.name === name) rows.push({ key, ev });
+    });
+  });
+  rows.sort((a,b) => {
+    if(a.key !== b.key) return a.key < b.key ? -1 : 1;
+    return (a.ev.time||'').localeCompare(b.ev.time||'');
+  });
+
+  document.getElementById('personTitle').textContent = `${escapeHtml(name)}님의 ${year}년 일정`;
+  document.getElementById('personSub').textContent = `총 ${rows.length}건의 일정이 등록되어 있어요.`;
+
+  const list = document.getElementById('personList');
+  if(rows.length === 0){
+    list.innerHTML = '<div style="font-size:13px;color:var(--sub);text-align:center;padding:20px 0;">올해 등록된 일정이 없습니다.</div>';
+  }else{
+    list.innerHTML = '';
+    rows.forEach(({key, ev}) => {
+      const [y,m,d] = key.split('-').map(Number);
+      const dow = DOW[new Date(y, m-1, d).getDay()];
+      const row = document.createElement('div');
+      row.className = 'item';
+      row.innerHTML = `
+        <div class="bar" style="background:${colorForName(ev.name)}"></div>
+        <div class="body">
+          <div class="name">${y}년 ${m}월 ${d}일 (${dow})${ev.time ? ' · ' + escapeHtml(ev.time) : ''}</div>
+          <div class="title">${escapeHtml(ev.title)}</div>
+          ${ev.note ? `<div class="note">${escapeHtml(ev.note)}</div>` : ''}
+        </div>
+      `;
+      list.appendChild(row);
+    });
+  }
+  document.getElementById('personOverlay').classList.add('open');
+}
+
+function closePersonModal(){
+  document.getElementById('personOverlay').classList.remove('open');
+}
+
+document.getElementById('personCloseBtn').addEventListener('click', closePersonModal);
+document.getElementById('personOverlay').addEventListener('click', (e) => {
+  if(e.target.id === 'personOverlay') closePersonModal();
+});
+
+function allKnownNames(){
+  const names = new Set(Object.keys(colorMap));
+  Object.values(data).forEach(list => list.forEach(ev => names.add(ev.name)));
+  return [...names].sort();
+}
+
+function renderColorList(){
+  const list = document.getElementById('colorList');
+  const names = new Set([...Object.keys(pendingColorMap), ...allKnownNames()]);
+  list.innerHTML = '';
+  if(names.size === 0){
+    list.innerHTML = '<div style="font-size:13px;color:var(--sub);text-align:center;padding:12px 0;">등록된 이름이 아직 없어요. 아래에서 추가해보세요.</div>';
+    return;
+  }
+  [...names].sort().forEach(name => {
+    const currentColor = pendingColorMap[name] || colorForName(name);
+    const row = document.createElement('div');
+    row.className = 'item';
+    row.style.flexDirection = 'column';
+    row.style.alignItems = 'stretch';
+    row.innerHTML = `
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
+        <div class="name" style="font-weight:600;font-size:13px;">${escapeHtml(name)}</div>
+        <button type="button" class="del" data-del-name="${escapeHtml(name)}">삭제</button>
+      </div>
+      <div class="swatches" data-name="${escapeHtml(name)}"></div>
+    `;
+    list.appendChild(row);
+    const swatchWrap = row.querySelector('.swatches');
+    COLORS.forEach(c => {
+      const sw = document.createElement('button');
+      sw.type = 'button';
+      sw.className = 'swatch' + (c.toLowerCase() === currentColor.toLowerCase() ? ' selected' : '');
+      sw.style.background = c;
+      sw.addEventListener('click', () => {
+        pendingColorMap[name] = c;
+        swatchWrap.querySelectorAll('.swatch').forEach(s => s.classList.remove('selected'));
+        sw.classList.add('selected');
+      });
+      swatchWrap.appendChild(sw);
+    });
+    row.querySelector('.del').addEventListener('click', () => {
+      delete pendingColorMap[name];
+      renderColorList();
+    });
+  });
+}
+
+let newNameSelectedColor = COLORS[0];
+
+function renderNewColorSwatches(){
+  const wrap = document.getElementById('newColorSwatches');
+  wrap.innerHTML = '';
+  COLORS.forEach(c => {
+    const sw = document.createElement('button');
+    sw.type = 'button';
+    sw.className = 'swatch' + (c === newNameSelectedColor ? ' selected' : '');
+    sw.style.background = c;
+    sw.addEventListener('click', () => {
+      newNameSelectedColor = c;
+      wrap.querySelectorAll('.swatch').forEach(s => s.classList.remove('selected'));
+      sw.classList.add('selected');
+    });
+    wrap.appendChild(sw);
+  });
+}
+
+function openColorSettings(){
+  pendingColorMap = { ...colorMap };
+  document.getElementById('newColorName').value = '';
+  newNameSelectedColor = COLORS[0];
+  renderNewColorSwatches();
+  renderColorList();
+  document.getElementById('colorOverlay').classList.add('open');
+}
+
+function closeColorSettings(){
+  document.getElementById('colorOverlay').classList.remove('open');
+}
+
+document.getElementById('settingsBtn').addEventListener('click', openColorSettings);
+document.getElementById('colorCloseBtn').addEventListener('click', closeColorSettings);
+document.getElementById('colorOverlay').addEventListener('click', (e) => {
+  if(e.target.id === 'colorOverlay') closeColorSettings();
+});
+document.getElementById('addColorRowBtn').addEventListener('click', () => {
+  const name = document.getElementById('newColorName').value.trim();
+  if(!name) return;
+  pendingColorMap[name] = newNameSelectedColor;
+  document.getElementById('newColorName').value = '';
+  newNameSelectedColor = COLORS[0];
+  renderNewColorSwatches();
+  renderColorList();
+});
+document.getElementById('colorSaveBtn').addEventListener('click', async () => {
+  colorMap = { ...pendingColorMap };
+  closeColorSettings();
+  render();
+  await saveColorMap();
+});
+
+loadData();
+</script>
+</body>
+</html>
