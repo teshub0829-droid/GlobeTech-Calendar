@@ -155,6 +155,10 @@
   }
   .swatch.selected{border-color:var(--ink);box-shadow:0 0 0 2px #fff inset;}
   .status{font-size:12px;color:var(--sub);margin-top:10px;text-align:center;}
+  .nav select{
+    height:34px;border:1px solid var(--line);background:var(--panel);border-radius:8px;
+    padding:0 8px;font-size:12px;color:var(--ink);cursor:pointer;font-family:inherit;
+  }
 </style>
 </head>
 <body>
@@ -165,6 +169,14 @@
   <div class="top">
     <div class="legend" id="legend"></div>
     <div class="nav">
+      <select id="refreshSelect" title="자동 새로고침 주기">
+        <option value="1">1분마다 갱신</option>
+        <option value="5">5분마다 갱신</option>
+        <option value="10">10분마다 갱신</option>
+        <option value="30">30분마다 갱신</option>
+        <option value="60">1시간마다 갱신</option>
+      </select>
+      <button id="backupBtn" title="일정 백업 / 복원">💾</button>
       <button id="lockBtn" title="보안(비밀번호) 설정">🔒</button>
       <button id="settingsBtn" title="이름별 색상 설정">⚙</button>
       <button id="prevBtn" title="이전 달">‹</button>
@@ -304,6 +316,33 @@
   </div>
 </div>
 
+<div class="overlay" id="backupOverlay">
+  <div class="modal" style="max-width:520px;">
+    <h3>일정 백업 / 복원</h3>
+    <p class="sub">지금까지 등록된 모든 일정과 이름별 색상을 파일로 저장하거나, 저장해 둔 내용을 다시 불러올 수 있어요.</p>
+
+    <div class="field">
+      <label>① 백업 (저장하기)</label>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;">
+        <button class="btn primary" id="backupDownloadBtn">파일로 내려받기</button>
+        <button class="btn" id="backupCopyBtn">내용 복사하기</button>
+      </div>
+    </div>
+
+    <div class="field" style="margin-top:16px;">
+      <label>② 복원 (불러오기) — 백업 내용을 아래 칸에 붙여넣고 '복원하기'를 눌러주세요</label>
+      <textarea id="backupText" style="min-height:150px;font-size:11px;font-family:Consolas,monospace;" placeholder="백업 내용이 여기에 표시돼요. 복원할 때는 저장해 둔 내용을 이 칸에 붙여넣으세요."></textarea>
+      <div style="font-size:11px;color:var(--sub);margin-top:6px;">※ 복원은 기존 일정을 지우지 않고, 없는 일정만 추가해요. 같은 일정이 중복으로 들어가지 않아요.</div>
+    </div>
+    <div id="backupMsg" style="font-size:12px;min-height:16px;margin-top:6px;"></div>
+
+    <div class="modal-actions">
+      <button class="btn ghost" id="backupCloseBtn">닫기</button>
+      <button class="btn primary" id="backupRestoreBtn">복원하기</button>
+    </div>
+  </div>
+</div>
+
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script>
 const SUPABASE_URL = 'https://gexpqdkjujxznoasmlua.supabase.co';
@@ -397,6 +436,7 @@ async function loadData(){
   }
   await loadColorMap();
   render();
+  dataReady = true;
 }
 
 async function loadColorMap(){
@@ -1033,6 +1073,220 @@ document.getElementById('pwSaveBtn').addEventListener('click', async () => {
     errEl.style.display = 'block';
   }
 });
+
+
+// ================= 추가 기능: 자동 새로고침 / 백업·복원 =================
+let dataReady = false;   // 일정 불러오기가 한 번 끝난 뒤에만 자동 갱신을 시작
+const REFRESH_PREF_KEY = 'gt_cal_refresh_minutes';
+let refreshMinutes = 10;
+let refreshTimer = null;
+let lastDayKey = todayKey();
+
+function timeLabel(){
+  const t = new Date();
+  return pad(t.getHours()) + ':' + pad(t.getMinutes());
+}
+
+function anyModalOpen(){
+  return ['overlay','colorOverlay','personOverlay','pwOverlay','gateOverlay','backupOverlay'].some(id => {
+    const el = document.getElementById(id);
+    return el && el.classList.contains('open');
+  });
+}
+
+// 저장소의 최신 일정/색상을 읽어온다 (읽기 실패 시 오류를 던져서, 화면의 기존 내용을 지우지 않게 한다)
+async function fetchLatest(){
+  const r1 = await supabaseClient.from('kv_store').select('value').eq('key', STORAGE_KEY).maybeSingle();
+  if(r1.error) throw r1.error;
+  const r2 = await supabaseClient.from('kv_store').select('value').eq('key', COLOR_STORAGE_KEY).maybeSingle();
+  if(r2.error) throw r2.error;
+  return {
+    events: (r1.data && r1.data.value) ? JSON.parse(r1.data.value) : {},
+    colors: (r2.data && r2.data.value) ? JSON.parse(r2.data.value) : {}
+  };
+}
+
+async function refreshData(){
+  if(!dataReady) return;          // 비밀번호 확인/첫 불러오기 전에는 건너뜀
+  if(anyModalOpen()) return;      // 입력·설정 창이 열려 있으면 작성 중인 내용이 방해받지 않도록 건너뜀
+  const statusEl = document.getElementById('status');
+  try{
+    const latest = await fetchLatest();
+    data = latest.events;
+    colorMap = latest.colors;
+  }catch(e){
+    statusEl.textContent = '갱신 중 오류가 발생했어요 (' + timeLabel() + '). 화면은 이전 내용을 유지합니다.';
+    return;
+  }
+  const nowKey = todayKey();      // 밤새 켜둬서 날짜가 바뀌었으면 오늘 기준 달로 이동
+  if(nowKey !== lastDayKey){
+    lastDayKey = nowKey;
+    baseDate = new Date();
+  }
+  render();
+  statusEl.textContent = '모든 직원과 공유되는 캘린더입니다. (마지막 갱신 ' + timeLabel() + ')';
+}
+
+function startRefreshTimer(){
+  if(refreshTimer) clearInterval(refreshTimer);
+  refreshTimer = setInterval(refreshData, refreshMinutes * 60 * 1000);
+}
+
+function initRefreshSetting(){
+  const sel = document.getElementById('refreshSelect');
+  try{
+    const v = parseInt(localStorage.getItem(REFRESH_PREF_KEY) || '', 10);
+    if([1,5,10,30,60].indexOf(v) !== -1) refreshMinutes = v;
+  }catch(e){}
+  sel.value = String(refreshMinutes);
+  sel.addEventListener('change', () => {
+    refreshMinutes = parseInt(sel.value, 10);
+    startRefreshTimer();
+    try{ localStorage.setItem(REFRESH_PREF_KEY, String(refreshMinutes)); }catch(e){}
+  });
+  startRefreshTimer();
+}
+
+document.addEventListener('visibilitychange', () => {
+  if(document.visibilityState === 'visible') refreshData();
+});
+
+// ---- 백업 / 복원 ----
+function buildBackupText(){
+  return JSON.stringify({ version:1, exportedAt:new Date().toISOString(), events:data, colors:colorMap }, null, 1);
+}
+function backupMessage(text, isError){
+  const el = document.getElementById('backupMsg');
+  el.style.color = isError ? 'var(--danger)' : 'var(--sub)';
+  el.textContent = text;
+}
+async function openBackup(){
+  await refreshData();   // 최신 내용으로 맞춘 뒤 백업 내용을 만든다
+  document.getElementById('backupText').value = buildBackupText();
+  backupMessage('', false);
+  document.getElementById('backupOverlay').classList.add('open');
+}
+function closeBackup(){ document.getElementById('backupOverlay').classList.remove('open'); }
+
+document.getElementById('backupBtn').addEventListener('click', openBackup);
+document.getElementById('backupCloseBtn').addEventListener('click', closeBackup);
+document.getElementById('backupOverlay').addEventListener('click', (e) => {
+  if(e.target.id === 'backupOverlay') closeBackup();
+});
+
+document.getElementById('backupDownloadBtn').addEventListener('click', () => {
+  try{
+    const text = buildBackupText();
+    const blob = new Blob([text], { type:'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'globetech-calendar-backup-' + todayKey() + '.json';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    document.getElementById('backupText').value = text;
+    backupMessage('내려받기를 시도했어요. 파일이 저장되지 않으면 [내용 복사하기]로 복사해서 메모장에 붙여넣어 보관해 주세요.', false);
+  }catch(e){
+    backupMessage('내려받기에 실패했어요. [내용 복사하기]를 이용해 주세요.', true);
+  }
+});
+
+document.getElementById('backupCopyBtn').addEventListener('click', async () => {
+  const ta = document.getElementById('backupText');
+  ta.value = buildBackupText();
+  try{
+    await navigator.clipboard.writeText(ta.value);
+    backupMessage('복사했어요. 메모장 등에 붙여넣어 보관해 주세요.', false);
+  }catch(e){
+    ta.focus(); ta.select();
+    let ok = false;
+    try{ ok = document.execCommand('copy'); }catch(err){}
+    backupMessage(ok ? '복사했어요. 메모장 등에 붙여넣어 보관해 주세요.' : '자동 복사가 안 돼요. 위 칸의 내용을 직접 전체 선택(Ctrl+A) 후 복사(Ctrl+C) 해주세요.', !ok);
+  }
+});
+
+document.getElementById('backupRestoreBtn').addEventListener('click', async () => {
+  let parsed;
+  try{
+    parsed = JSON.parse(document.getElementById('backupText').value);
+  }catch(e){
+    backupMessage('붙여넣은 내용을 읽을 수 없어요. 백업 내용을 처음부터 끝까지 그대로 붙여넣었는지 확인해 주세요.', true);
+    return;
+  }
+  if(!parsed || typeof parsed.events !== 'object' || parsed.events === null || Array.isArray(parsed.events)){
+    backupMessage('백업 형식이 맞지 않아요. 이 캘린더에서 만든 백업 내용인지 확인해 주세요.', true);
+    return;
+  }
+  // 다른 직원이 방금 올린 일정을 덮어쓰지 않도록, 저장소의 최신 내용을 먼저 읽어온 뒤 합친다
+  try{
+    const latest = await fetchLatest();
+    data = latest.events;
+    colorMap = latest.colors;
+  }catch(e){
+    backupMessage('저장소에서 최신 내용을 읽지 못해 복원을 중단했어요. 인터넷 연결을 확인하고 다시 시도해 주세요.', true);
+    return;
+  }
+
+  const addedIds = [];
+  let addedColors = 0;
+  Object.keys(parsed.events).forEach(dateKey => {
+    if(!/^\d{4}-\d{2}-\d{2}$/.test(dateKey)) return;
+    const incoming = parsed.events[dateKey];
+    if(!Array.isArray(incoming)) return;
+    if(!data[dateKey]) data[dateKey] = [];
+    const ids = new Set(data[dateKey].map(ev => ev.id));
+    incoming.forEach(ev => {
+      if(!ev || !ev.title) return;
+      const copy = Object.assign({}, ev);
+      // 예전 형식(이름 1명: name)의 백업도 지금 형식(참석자 여러 명: names)으로 맞춰서 가져온다
+      if(!Array.isArray(copy.names) || copy.names.length === 0){
+        if(!copy.name) return;
+        copy.names = [String(copy.name)];
+      }
+      delete copy.name;
+      if(!copy.id) copy.id = Date.now().toString(36) + Math.random().toString(36).slice(2,7);
+      if(ids.has(copy.id)) return;
+      data[dateKey].push(copy);
+      ids.add(copy.id);
+      addedIds.push(copy.id);
+    });
+    if(data[dateKey].length === 0) delete data[dateKey];
+  });
+  if(parsed.colors && typeof parsed.colors === 'object'){
+    Object.keys(parsed.colors).forEach(name => {
+      if(!colorMap[name] && /^#[0-9a-fA-F]{6}$/.test(parsed.colors[name])){
+        colorMap[name] = parsed.colors[name];
+        addedColors++;
+      }
+    });
+  }
+  await saveData();
+  await saveColorMap();
+
+  // 실제로 저장소에 들어갔는지 다시 읽어서 확인한 뒤 결과를 알려준다
+  try{
+    const check = await fetchLatest();
+    const present = new Set();
+    Object.values(check.events).forEach(list => list.forEach(ev => present.add(ev.id)));
+    const saved = addedIds.filter(id => present.has(id)).length;
+    data = check.events;
+    colorMap = check.colors;
+    render();
+    document.getElementById('backupText').value = buildBackupText();
+    if(saved === addedIds.length){
+      backupMessage('복원 완료: 일정 ' + saved + '건, 색상 ' + addedColors + '건을 추가했어요. (이미 있던 내용은 그대로 두었어요)', false);
+    }else{
+      backupMessage('일정 ' + addedIds.length + '건 중 ' + saved + '건만 저장소에 반영됐어요. 같은 내용으로 [복원하기]를 다시 눌러도 중복되지 않아요.', true);
+    }
+  }catch(e){
+    render();
+    backupMessage('저장은 시도했지만 확인하지 못했어요. 화면을 새로고침해서 일정이 들어갔는지 확인해 주세요.', true);
+  }
+});
+
+initRefreshSetting();
 
 initGate();
 </script>
