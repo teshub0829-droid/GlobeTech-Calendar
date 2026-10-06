@@ -169,14 +169,14 @@
   <div class="top">
     <div class="legend" id="legend"></div>
     <div class="nav">
-      <select id="refreshSelect" title="자동 새로고침 주기">
+      <select id="refreshSelect" title="자동 새로고침 주기 (관리자만 변경 가능)">
         <option value="1">1분마다 갱신</option>
         <option value="5">5분마다 갱신</option>
         <option value="10">10분마다 갱신</option>
         <option value="30">30분마다 갱신</option>
         <option value="60">1시간마다 갱신</option>
       </select>
-      <button id="backupBtn" title="일정 백업 / 복원">💾</button>
+      <button id="backupBtn" title="일정 백업 / 복원 (관리자 전용)">💾</button>
       <button id="lockBtn" title="보안(비밀번호) 설정">🔒</button>
       <button id="settingsBtn" title="이름별 색상 설정">⚙</button>
       <button id="prevBtn" title="이전 달">‹</button>
@@ -312,6 +312,22 @@
     <div class="modal-actions">
       <button class="btn ghost" id="pwCloseBtn">닫기</button>
       <button class="btn primary" id="pwSaveBtn">변경하기</button>
+    </div>
+  </div>
+</div>
+
+<div class="overlay" id="adminCheckOverlay">
+  <div class="modal" style="max-width:380px;">
+    <h3>🔑 관리자 확인</h3>
+    <p class="sub" id="adminCheckSub">관리자 비밀번호를 입력해 주세요.</p>
+    <div class="field">
+      <label>관리자 비밀번호</label>
+      <input type="password" id="adminCheckPw" autocomplete="off">
+    </div>
+    <div class="err" id="adminCheckErr">비밀번호가 올바르지 않습니다.</div>
+    <div class="modal-actions">
+      <button class="btn ghost" id="adminCheckCancelBtn">취소</button>
+      <button class="btn primary" id="adminCheckOkBtn">확인</button>
     </div>
   </div>
 </div>
@@ -1075,6 +1091,69 @@ document.getElementById('pwSaveBtn').addEventListener('click', async () => {
 });
 
 
+
+// ---- 관리자 확인 (자동 갱신 주기 변경 / 백업·복원은 관리자만) ----
+let adminResolve = null;
+
+function requireAdmin(purpose){
+  return new Promise(resolve => {
+    if(adminResolve) adminResolve(false);
+    adminResolve = resolve;
+    document.getElementById('adminCheckSub').textContent = purpose + ' 기능은 관리자만 사용할 수 있어요. 관리자 비밀번호를 입력해 주세요.';
+    document.getElementById('adminCheckPw').value = '';
+    document.getElementById('adminCheckErr').style.display = 'none';
+    document.getElementById('adminCheckOverlay').classList.add('open');
+    setTimeout(() => document.getElementById('adminCheckPw').focus(), 50);
+  });
+}
+
+function finishAdminCheck(result){
+  document.getElementById('adminCheckOverlay').classList.remove('open');
+  document.getElementById('adminCheckPw').value = '';
+  const r = adminResolve;
+  adminResolve = null;
+  if(r) r(result);
+}
+
+function adminCheckError(text){
+  const el = document.getElementById('adminCheckErr');
+  el.textContent = text;
+  el.style.display = 'block';
+}
+
+async function submitAdminCheck(){
+  const pw = document.getElementById('adminCheckPw').value;
+  if(!pw) return;
+  document.getElementById('adminCheckErr').style.display = 'none';
+  let hash = null;
+  try{
+    const { data: rows, error } = await supabaseClient.from('kv_store').select('value').eq('key', ADMIN_PW_KEY).maybeSingle();
+    if(error) throw error;
+    hash = (rows && rows.value) ? rows.value : null;
+  }catch(e){
+    adminCheckError('확인하지 못했어요. 인터넷 연결을 확인하고 다시 시도해 주세요.');
+    return;
+  }
+  if(!hash){
+    adminCheckError('관리자 비밀번호가 아직 등록되어 있지 않아요. 🔒 메뉴에서 먼저 관리자 비밀번호를 등록해 주세요.');
+    return;
+  }
+  if((await sha256(pw)) === hash){
+    finishAdminCheck(true);
+  }else{
+    adminCheckError('관리자 비밀번호가 올바르지 않습니다.');
+  }
+}
+
+document.getElementById('adminCheckOkBtn').addEventListener('click', submitAdminCheck);
+document.getElementById('adminCheckCancelBtn').addEventListener('click', () => finishAdminCheck(false));
+document.getElementById('adminCheckPw').addEventListener('keydown', (e) => {
+  if(e.key === 'Enter'){ e.preventDefault(); submitAdminCheck(); }
+});
+document.getElementById('adminCheckOverlay').addEventListener('click', (e) => {
+  if(e.target.id === 'adminCheckOverlay') finishAdminCheck(false);
+});
+
 // ================= 추가 기능: 자동 새로고침 / 백업·복원 =================
 let dataReady = false;   // 일정 불러오기가 한 번 끝난 뒤에만 자동 갱신을 시작
 const REFRESH_PREF_KEY = 'gt_cal_refresh_minutes';
@@ -1088,7 +1167,7 @@ function timeLabel(){
 }
 
 function anyModalOpen(){
-  return ['overlay','colorOverlay','personOverlay','pwOverlay','gateOverlay','backupOverlay'].some(id => {
+  return ['overlay','colorOverlay','personOverlay','pwOverlay','gateOverlay','backupOverlay','adminCheckOverlay'].some(id => {
     const el = document.getElementById(id);
     return el && el.classList.contains('open');
   });
@@ -1139,8 +1218,11 @@ function initRefreshSetting(){
     if([1,5,10,30,60].indexOf(v) !== -1) refreshMinutes = v;
   }catch(e){}
   sel.value = String(refreshMinutes);
-  sel.addEventListener('change', () => {
-    refreshMinutes = parseInt(sel.value, 10);
+  sel.addEventListener('change', async () => {
+    const wanted = parseInt(sel.value, 10);
+    const allowed = await requireAdmin('자동 새로고침 주기 변경');
+    if(!allowed){ sel.value = String(refreshMinutes); return; }   // 관리자가 아니면 원래 값으로 되돌림
+    refreshMinutes = wanted;
     startRefreshTimer();
     try{ localStorage.setItem(REFRESH_PREF_KEY, String(refreshMinutes)); }catch(e){}
   });
@@ -1168,7 +1250,9 @@ async function openBackup(){
 }
 function closeBackup(){ document.getElementById('backupOverlay').classList.remove('open'); }
 
-document.getElementById('backupBtn').addEventListener('click', openBackup);
+document.getElementById('backupBtn').addEventListener('click', async () => {
+  if(await requireAdmin('백업/복원')) openBackup();
+});
 document.getElementById('backupCloseBtn').addEventListener('click', closeBackup);
 document.getElementById('backupOverlay').addEventListener('click', (e) => {
   if(e.target.id === 'backupOverlay') closeBackup();
